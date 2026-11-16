@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PulseRoute</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_servers">Servers</string>
+    <string name="nav_routing">Routing</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Connection state -->
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnecting">Disconnecting…</string>
+    <string name="status_error">Connection error</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="tap_to_connect">Tap to connect</string>
+    <string name="tap_to_disconnect">Tap to disconnect</string>
+    <string name="connecting_via">Connecting via %1$s</string>
+    <string name="connected_via">Connected via %1$s</string>
+
+    <!-- Traffic -->
+    <string name="download">Download</string>
+    <string name="upload">Upload</string>
+    <string name="duration">Duration</string>
+    <string name="session_traffic">Session traffic</string>
+    <string name="traffic_rate">%1$s / %2$s</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">PulseRoute</string>
+    <string name="dashboard_subtitle">A quieter way through the network.</string>
+    <string name="quick_actions">Quick actions</string>
+    <string name="manage_servers">Manage servers</string>
+    <string name="refresh_list">Refresh list</string>
+    <string name="session">Session</string>
+    <string name="active_server">Active server</string>
+    <string name="no_server_selected">No server selected</string>
+    <string name="no_server_selected_desc">Import or fetch a server list to get started.</string>
+    <string name="choose_server">Choose server</string>
+    <string name="routing">Routing</string>
+    <string name="routing_title">Routing</string>
+    <string name="routing_subtitle">Choose what stays outside the tunnel and which geo rules apply.</string>
+    <string name="geo_assets_info">Country and ad rules use bundled geoip/geosite databases. If only legacy .dat files are present, add sing-box .db files to app/src/main/assets/geo.</string>
+    <string name="mtu">Tunnel MTU</string>
+    <string name="mtu_desc">1200–1500 is safe for most mobile networks. Default: 9000 for TUN overhead.</string>
+    <string name="save_mtu">Save MTU</string>
+    <string name="country_hint">Two-letter ISO code, e.g. IR</string>
+    <string name="bypass_lan">Bypass local networks</string>
+    <string name="bypass_lan_desc">Send private and LAN addresses directly, outside the tunnel.</string>
+    <string name="bypass_country">Bypass country domains</string>
+    <string name="bypass_country_desc">Route this country\'s domains and IP ranges directly. Requires geo assets.</string>
+    <string name="country">Country</string>
+    <string name="block_ads">Block ads and trackers</string>
+    <string name="block_ads_desc">Reject requests that match the ads/tracker geosite category.</string>
+    <string name="engine_label">Engine</string>
+    <string name="engine_unavailable">Proxy engine is not bundled. Add libbox.aar to app/libs and rebuild.</string>
+
+    <!-- Server list -->
+    <string name="servers_title">Servers</string>
+    <string name="search_servers">Search servers</string>
+    <string name="import_servers">Import</string>
+    <string name="refresh">Refresh</string>
+    <string name="fetch_remote">Fetch remote list</string>
+    <string name="remote_url">Remote URL</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Configure the server source and inspect the engine.</string>
+    <string name="remote_list_section">Remote server list</string>
+    <string name="remote_list_desc">Paste a direct link to JSON or Servers.js. The fetched list is cached locally.</string>
+    <string name="engine_status">Engine status</string>
+    <string name="engine_ready">libbox is bundled and ready.</string>
+    <string name="engine_missing">libbox is not bundled. Add a compatible libbox.aar to app/libs and rebuild.</string>
+    <string name="about">About</string>
+    <string name="version_label">Version %1$s</string>
+    <string name="servers_count">%1$d servers</string>
+    <string name="paste">Paste</string>
+    <string name="remote_url_hint">https://example.com/Servers.js</string>
+    <string name="import_from_file">Import from file</string>
+    <string name="paste_json">Paste JSON or Servers.js</string>
+    <string name="paste_json_hint">Paste a JSON array, a { \"servers\": [...] } object, or a Servers.js assignment.</string>
+    <string name="save">Save</string>
+    <string name="saved">Saved</string>
+    <string name="importing">Importing…</string>
+    <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+    <string name="ok">OK</string>
+    <string name="server_list_empty">No servers yet</string>
+    <string name="server_list_empty_desc">Import a JSON/Servers.js file or fetch a remote list.</string>
+    <string name="no_matches">No matching servers</string>
+    <string name="server_selected">Selected</string>
+    <string name="select">Select</string>
+    <string name="latency_ms">%1$d ms</string>
+    <string name="latency_unknown">—</string>
+    <string name="imported_count">Imported %1$d server(s)</string>
+    <string name="import_failed">Import failed: %1$s</string>
+    <string name="fetch_success">Fetched %1$d server(s)</string>
+    <string name="fetch_failed">Fetch failed: %1$s</string>
+    <string name="remote_url_required">Enter a remote list URL first.</string>
+
+    <!-- Protocols -->
+    <string name="protocol_vmess">VMess</string>
+    <string name="protocol_vless">VLESS</string>
+    <string name="protocol_wireguard">WireGuard</string>
+
+    <!-- Permission / service -->
+    <string name="vpn_permission_denied">VPN permission was not granted.</string>
+    <string name="notification_channel_name">VPN status</string>
+    <string name="notification_channel_desc">Shows the active tunnel and a disconnect action.</string>
+    <string name="notification_connecting">Establishing tunnel…</string>
+    <string name="notification_connected">Tunnel active</string>
+    <string name="notification_stop">Stop</string>
+    <string name="notification_error">Tunnel error</string>
+
+    <!-- Accessibility -->
+    <string name="cd_back">Back</string>
+    <string name="cd_server_list">Open server list</string>
+    <string name="cd_connection_toggle">Connection toggle</string>
+</resources>
