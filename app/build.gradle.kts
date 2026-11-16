@@ -94,7 +94,7 @@ dependencies {
     // Drop the official sing-box libbox AAR (built with gomobile) into app/libs/.
     // The engine bridge loads it reflectively, so the app still builds without it.
     if (file("libs/libbox.aar").exists()) {
-        implementation(files("libs/libbox.aar"))
+        implementation("com.github.singbox-android:libbox:1.13.11")
     }
 
     testImplementation(libs.junit)
