@@ -55,7 +55,7 @@
     <string name="block_ads">Block ads and trackers</string>
     <string name="block_ads_desc">Reject requests that match the ads/tracker geosite category.</string>
     <string name="engine_label">Engine</string>
-    <string name="engine_unavailable">Proxy engine is not bundled. Add libbox.aar to app/libs and rebuild.</string>
+    <string name="engine_unavailable">Proxy engine native library is unavailable.</string>
 
     <!-- Server list -->
     <string name="servers_title">Servers</string>
@@ -67,10 +67,10 @@
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Configure the server source and inspect the engine.</string>
     <string name="remote_list_section">Remote server list</string>
-    <string name="remote_list_desc">Paste a direct link to JSON or Servers.js. The fetched list is cached locally.</string>
+    <string name="remote_list_desc">Paste a direct link to JSON, Servers.js, or a plain-text list of proxy links (one per line). The fetched list is cached locally.</string>
     <string name="engine_status">Engine status</string>
-    <string name="engine_ready">libbox is bundled and ready.</string>
-    <string name="engine_missing">libbox is not bundled. Add a compatible libbox.aar to app/libs and rebuild.</string>
+    <string name="engine_ready">libbox native library loaded and ready.</string>
+    <string name="engine_missing">libbox native library failed to load.</string>
     <string name="about">About</string>
     <string name="version_label">Version %1$s</string>
     <string name="servers_count">%1$d servers</string>
@@ -78,7 +78,7 @@
     <string name="remote_url_hint">https://example.com/Servers.js</string>
     <string name="import_from_file">Import from file</string>
     <string name="paste_json">Paste JSON or Servers.js</string>
-    <string name="paste_json_hint">Paste a JSON array, a { \"servers\": [...] } object, or a Servers.js assignment.</string>
+    <string name="paste_json_hint">Paste a JSON array, a { \"servers\": [...] } object, a Servers.js assignment, or vmess/vless links (one per line).</string>
     <string name="save">Save</string>
     <string name="saved">Saved</string>
     <string name="importing">Importing…</string>

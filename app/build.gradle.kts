@@ -91,11 +91,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
-    // Drop the official sing-box libbox AAR (built with gomobile) into app/libs/.
-    // The engine bridge loads it reflectively, so the app still builds without it.
-    if (file("libs/libbox.aar").exists()) {
-        implementation("com.github.singbox-android:libbox:1.13.11")
-    }
+    // sing-box libbox AAR from JitPack. The engine bridge loads it reflectively.
+    implementation("com.github.singbox-android:libbox:1.13.11")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

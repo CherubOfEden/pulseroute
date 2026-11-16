@@ -2,6 +2,7 @@ package com.pulseroute.vpn.data.parser
 
 import com.pulseroute.vpn.data.model.Protocol
 import com.pulseroute.vpn.data.model.TransportType
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -108,6 +109,41 @@ class ServerListParserTest {
         """.trimIndent()
 
         assertEquals(Protocol.VLESS, ServerListParser.parse(payload).single().protocol)
+    }
+
+    @Test
+    fun parsesPlainTextProxyLinks() {
+        val vmessJson = """
+            {"v":"2","ps":"Plain VMess","add":"vm.example.com","port":"443","id":"33333333-3333-4333-8333-333333333333","aid":"0","net":"ws","path":"/ws","host":"cdn.example.com","tls":"tls","sni":"cdn.example.com"}
+        """.trimIndent()
+        val encoded = Base64.getEncoder().encodeToString(vmessJson.toByteArray())
+        val payload = """
+            # plain text list
+            vmess://$encoded
+            vless://44444444-4444-4444-8444-444444444444@vl.example.com:8443?encryption=none&security=reality&sni=front.example.com&fp=chrome&pbk=public-key&sid=abcd&type=grpc&serviceName=pulse&flow=xtls-rprx-vision#Plain%20VLESS
+        """.trimIndent()
+
+        val servers = ServerListParser.parse(payload)
+
+        assertEquals(2, servers.size)
+
+        val vmess = servers.first { it.protocol == Protocol.VMESS }
+        assertEquals("vm.example.com", vmess.address)
+        assertEquals(443, vmess.port)
+        assertEquals("Plain VMess", vmess.name)
+        assertEquals(TransportType.WS, vmess.vmess?.transport?.type)
+        assertEquals("/ws", vmess.vmess?.transport?.path)
+        assertEquals("cdn.example.com", vmess.vmess?.tls?.serverName)
+
+        val vless = servers.first { it.protocol == Protocol.VLESS }
+        assertEquals("vl.example.com", vless.address)
+        assertEquals(8443, vless.port)
+        assertEquals("Plain VLESS", vless.name)
+        assertEquals("xtls-rprx-vision", vless.vless?.flow)
+        assertEquals(TransportType.GRPC, vless.vless?.transport?.type)
+        assertEquals("pulse", vless.vless?.transport?.serviceName)
+        assertEquals("front.example.com", vless.vless?.tls?.serverName)
+        assertEquals("public-key", vless.vless?.tls?.realityPublicKey)
     }
 
     @Test(expected = ServerParseException::class)

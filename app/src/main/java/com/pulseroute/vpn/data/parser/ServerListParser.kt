@@ -8,7 +8,10 @@ import com.pulseroute.vpn.data.model.TransportType
 import com.pulseroute.vpn.data.model.VlessOptions
 import com.pulseroute.vpn.data.model.VmessOptions
 import com.pulseroute.vpn.data.model.WireGuardOptions
+import java.net.URI
+import java.net.URLDecoder
 import java.security.MessageDigest
+import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -40,6 +43,16 @@ object ServerListParser {
     )
 
     fun parse(payload: String): List<ServerEntry> {
+        return try {
+            parseJson(payload)
+        } catch (error: ServerParseException) {
+            val links = parseProxyLinks(payload)
+            if (links.isNotEmpty()) return links
+            throw error
+        }
+    }
+
+    private fun parseJson(payload: String): List<ServerEntry> {
         val extracted = JsConfigExtractor.extract(payload)
         val element = try {
             json.parseToJsonElement(extracted)
@@ -56,14 +69,246 @@ object ServerListParser {
         }
 
         val servers = array
-            .mapNotNull { it as? JsonObject }
-            .mapNotNull(::mapServer)
+            .mapNotNull { item ->
+                when (item) {
+                    is JsonObject -> mapServer(item)
+                    is JsonPrimitive -> item.content.takeIf { it.isNotBlank() }?.let(::parseProxyLink)
+                    else -> null
+                }
+            }
             .distinctBy { it.id }
 
         if (servers.isEmpty()) {
             throw ServerParseException("No valid servers were found in the payload")
         }
         return servers
+    }
+
+    private fun parseProxyLinks(payload: String): List<ServerEntry> =
+        payload.lineSequence()
+            .map { it.trim().removePrefix("\uFEFF") }
+            .filter { line ->
+                line.isNotEmpty() &&
+                    !line.startsWith("#") &&
+                    !line.startsWith("//")
+            }
+            .mapNotNull(::parseProxyLink)
+            .distinctBy { it.id }
+            .toList()
+
+    private fun parseProxyLink(line: String): ServerEntry? {
+        val trimmed = line.trim().removePrefix("\uFEFF")
+        return when {
+            trimmed.startsWith("vmess://", ignoreCase = true) -> parseVmessLink(trimmed)
+            trimmed.startsWith("vless://", ignoreCase = true) -> parseVlessLink(trimmed)
+            else -> null
+        }
+    }
+
+    private fun parseVmessLink(link: String): ServerEntry? {
+        val encoded = link.substringAfter("://", "").substringBefore('#').trim()
+        if (encoded.isEmpty()) return null
+
+        val decoded = decodeBase64(percentDecode(encoded)) ?: return null
+        val source = runCatching {
+            json.parseToJsonElement(decoded) as? JsonObject
+        }.getOrNull() ?: return null
+
+        val host = source.string("add", "address", "server", "host")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val port = source.int("port", "server_port", "serverPort") ?: return null
+        if (port !in 1..65535) return null
+        val uuid = source.string("id", "uuid", "userId", "user_id")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+
+        val network = source.string("net", "network")
+        val transport = TransportOptions(
+            type = transportType(network?.lowercase()),
+            path = source.string("path"),
+            host = source.string("host", "hostHeader")?.takeIf { it.isNotBlank() },
+            serviceName = source.string("serviceName", "service_name")
+                ?.takeIf { it.isNotBlank() },
+        )
+
+        val tlsValue = source.string("tls")?.lowercase() ?: ""
+        val tlsEnabled = tlsValue in setOf("tls", "reality", "xtls", "true", "1") ||
+            source.boolean("tls") == true
+        val tls = if (tlsEnabled) {
+            TlsOptions(
+                enabled = true,
+                serverName = source.string("sni", "serverName", "servername"),
+                allowInsecure = source.boolean("allowInsecure", "skipCertVerify", "insecure")
+                    ?: false,
+                alpn = source.stringList("alpn"),
+                fingerprint = source.string("fp", "fingerprint"),
+                realityPublicKey = source.string("pbk", "publicKey"),
+                realityShortId = source.string("sid", "shortId"),
+            )
+        } else {
+            null
+        }
+
+        val name = source.string("ps", "name", "remark", "remarks")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: "$host:$port"
+        val security = source.string("scy", "security", "cipher")
+            ?.lowercase()
+            ?.takeIf { it.isNotBlank() && it !in setOf("tls", "reality", "none") }
+            ?: "auto"
+
+        return ServerEntry(
+            id = stableId("${Protocol.VMESS.name}|$host|$port|$uuid"),
+            name = name,
+            protocol = Protocol.VMESS,
+            address = host,
+            port = port,
+            vmess = VmessOptions(
+                uuid = uuid,
+                alterId = source.int("aid", "alterId", "alter_id") ?: 0,
+                security = security,
+                tls = tls,
+                transport = transport,
+            ),
+        )
+    }
+
+    private fun parseVlessLink(link: String): ServerEntry? {
+        val uri = parseUri(link) ?: return null
+        val authority = uri.rawAuthority ?: return null
+        val authorityHost = authority.substringAfterLast('@')
+
+        val uuid = uri.rawUserInfo
+            ?.let(::percentDecode)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+
+        val host = uri.host
+            ?.removeSurrounding("[", "]")
+            ?.takeIf { it.isNotBlank() }
+            ?: hostFromAuthority(authorityHost)
+            ?: return null
+
+        val port = uri.port.takeIf { it in 1..65535 }
+            ?: portFromAuthority(authorityHost)?.takeIf { it in 1..65535 }
+            ?: 443
+
+        val params = parseQuery(uri.rawQuery)
+        val security = params["security"]?.lowercase() ?: ""
+        val tlsEnabled = security in setOf("tls", "reality", "xtls")
+        val tls = if (tlsEnabled) {
+            TlsOptions(
+                enabled = true,
+                serverName = params["sni"]
+                    ?: params["servername"]
+                    ?: params["peer"]?.takeIf { it.isNotBlank() },
+                allowInsecure = params["allowinsecure"]?.toBooleanLoose()
+                    ?: params["insecure"]?.toBooleanLoose()
+                    ?: false,
+                alpn = params["alpn"]
+                    ?.split(',')
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    ?: emptyList(),
+                fingerprint = params["fp"] ?: params["fingerprint"],
+                realityPublicKey = params["pbk"] ?: params["publickey"],
+                realityShortId = params["sid"] ?: params["shortid"],
+            )
+        } else {
+            null
+        }
+
+        val transport = TransportOptions(
+            type = transportType((params["type"] ?: params["network"])?.lowercase()),
+            path = params["path"]?.takeIf { it.isNotEmpty() },
+            host = (params["host"] ?: params["hostheader"])?.takeIf { it.isNotEmpty() },
+            serviceName = (params["servicename"] ?: params["service_name"])
+                ?.takeIf { it.isNotEmpty() },
+        )
+
+        val name = uri.rawFragment
+            ?.let(::percentDecode)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: "$host:$port"
+
+        return ServerEntry(
+            id = stableId("${Protocol.VLESS.name}|$host|$port|$uuid"),
+            name = name,
+            protocol = Protocol.VLESS,
+            address = host,
+            port = port,
+            vless = VlessOptions(
+                uuid = uuid,
+                flow = params["flow"]?.takeIf { it.isNotBlank() },
+                tls = tls,
+                transport = transport,
+            ),
+        )
+    }
+
+    private fun parseUri(value: String): URI? {
+        val trimmed = value.trim()
+        return runCatching { URI(trimmed) }
+            .recoverCatching { URI(trimmed.replace(" ", "%20")) }
+            .getOrNull()
+    }
+
+    private fun parseQuery(rawQuery: String?): Map<String, String> {
+        if (rawQuery.isNullOrBlank()) return emptyMap()
+        val params = LinkedHashMap<String, String>()
+        for (part in rawQuery.split('&')) {
+            if (part.isBlank()) continue
+            val key = percentDecode(part.substringBefore('=')).trim().lowercase()
+            if (key.isEmpty()) continue
+            params[key] = percentDecode(part.substringAfter('=', ""))
+        }
+        return params
+    }
+
+    private fun percentDecode(value: String): String = try {
+        URLDecoder.decode(value.replace("+", "%2B"), Charsets.UTF_8.name())
+    } catch (_: IllegalArgumentException) {
+        value
+    }
+
+    private fun decodeBase64(value: String): String? {
+        val compact = value.filterNot { it.isWhitespace() }
+        if (compact.isEmpty()) return null
+        val padded = compact + "=".repeat((4 - compact.length % 4) % 4)
+        val bytes = runCatching { Base64.getDecoder().decode(padded) }
+            .recoverCatching { Base64.getUrlDecoder().decode(padded) }
+            .getOrNull()
+            ?: return null
+        return runCatching { String(bytes, Charsets.UTF_8) }.getOrNull()
+    }
+
+    private fun hostFromAuthority(authority: String): String? {
+        if (authority.isBlank()) return null
+        if (authority.startsWith("[")) {
+            return authority.substringAfter('[').substringBefore(']').takeIf { it.isNotBlank() }
+        }
+        return authority.substringBefore(':').takeIf { it.isNotBlank() }
+    }
+
+    private fun portFromAuthority(authority: String): Int? {
+        val port = if (authority.startsWith("[")) {
+            authority.substringAfter(']').removePrefix(":")
+        } else {
+            authority.substringAfter(':', "")
+        }
+        return port.toIntOrNull()
+    }
+
+    private fun String.toBooleanLoose(): Boolean? = when (lowercase()) {
+        "1", "true", "yes", "on" -> true
+        "0", "false", "no", "off" -> false
+        else -> null
     }
 
     private fun findServerArray(element: JsonObject): JsonArray? {

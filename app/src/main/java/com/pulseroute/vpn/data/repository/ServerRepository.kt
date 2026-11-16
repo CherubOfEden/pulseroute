@@ -1,6 +1,7 @@
 package com.pulseroute.vpn.data.repository
 
 import android.content.Context
+import android.util.Log
 import com.pulseroute.vpn.data.model.ServerCache
 import com.pulseroute.vpn.data.model.ServerEntry
 import com.pulseroute.vpn.data.parser.ServerListParser
@@ -74,7 +75,16 @@ class ServerRepository(
                     throw IOException("Response is too large")
                 }
 
-                val parsed = ServerListParser.parse(payload)
+                val parsed = try {
+                    ServerListParser.parse(payload)
+                } catch (error: Exception) {
+                    Log.e(
+                        TAG,
+                        "Failed to parse remote server list from $url. Raw response:\n$payload",
+                        error,
+                    )
+                    throw error
+                }
                 _servers.value = parsed
                 _loaded.value = true
                 persist(parsed)
@@ -85,7 +95,16 @@ class ServerRepository(
 
     suspend fun import(payload: String): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
-            val parsed = ServerListParser.parse(payload)
+            val parsed = try {
+                ServerListParser.parse(payload)
+            } catch (error: Exception) {
+                Log.e(
+                    TAG,
+                    "Failed to parse imported server list. Raw payload:\n$payload",
+                    error,
+                )
+                throw error
+            }
             val merged = LinkedHashMap<String, ServerEntry>(_servers.value.size + parsed.size)
             _servers.value.forEach { merged[it.id] = it }
             parsed.forEach { merged[it.id] = it }
@@ -127,6 +146,7 @@ class ServerRepository(
     }
 
     private companion object {
+        const val TAG = "ServerRepository"
         const val CACHE_FILE = "servers_cache.json"
         const val MAX_PAYLOAD_BYTES = 5 * 1024 * 1024
         const val USER_AGENT = "PulseRoute/0.1 (Android)"

@@ -63,7 +63,7 @@ fun SettingsScreen(
     var syncing by remember { mutableStateOf(false) }
 
     val engineReady = remember {
-        runCatching { Class.forName("io.nekohasekai.libbox.Libbox") }.isSuccess
+        runCatching { System.loadLibrary("libbox") }.isSuccess
     }
     val versionName = remember {
         runCatching {
