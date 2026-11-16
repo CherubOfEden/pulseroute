@@ -5,8 +5,10 @@ import android.util.Log
 import com.pulseroute.vpn.data.model.ServerCache
 import com.pulseroute.vpn.data.model.ServerEntry
 import com.pulseroute.vpn.data.parser.ServerListParser
+import com.pulseroute.vpn.data.parser.ServerParseException
 import java.io.File
 import java.io.IOException
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,14 +51,27 @@ class ServerRepository(
 
     suspend fun refresh(remoteUrl: String): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
-            val url = remoteUrl.trim()
-            require(url.isNotEmpty()) { "Remote URL is empty" }
-            require(url.startsWith("https://")) {
+            val parsed = fetchAndParseRemoteList(remoteUrl.trim())
+            _servers.value = parsed
+            _loaded.value = true
+            persist(parsed)
+            parsed.size
+        }
+    }
+
+    /**
+     * Fetches [remoteUrl] and parses the response in three progressively looser passes:
+     * JSON, Base64-encoded proxy links, then plain-text proxy links.
+     */
+    private fun fetchAndParseRemoteList(remoteUrl: String): List<ServerEntry> {
+        val raw = try {
+            require(remoteUrl.isNotEmpty()) { "Remote URL is empty" }
+            require(remoteUrl.startsWith("https://")) {
                 "Remote URL must use HTTPS"
             }
 
             val request = Request.Builder()
-                .url(url)
+                .url(remoteUrl)
                 .header("Accept", "application/json, text/javascript, text/plain, */*")
                 .header("User-Agent", USER_AGENT)
                 .build()
@@ -74,22 +89,79 @@ class ServerRepository(
                 if (payload.length > MAX_PAYLOAD_BYTES) {
                     throw IOException("Response is too large")
                 }
-
-                val parsed = try {
-                    ServerListParser.parse(payload)
-                } catch (error: Exception) {
-                    Log.e(
-                        TAG,
-                        "Failed to parse remote server list from $url. Raw response:\n$payload",
-                        error,
-                    )
-                    throw error
-                }
-                _servers.value = parsed
-                _loaded.value = true
-                persist(parsed)
-                parsed.size
+                payload
             }
+        } catch (error: Exception) {
+            Log.e(TAG, "Failed to fetch remote server list from $remoteUrl", error)
+            throw error
+        }
+
+        return try {
+            parseRemoteListPayload(raw)
+        } catch (error: Exception) {
+            Log.e(
+                TAG,
+                "Failed to parse remote server list from $remoteUrl. Raw response:\n$raw",
+                error,
+            )
+            throw error
+        }
+    }
+
+    private fun parseRemoteListPayload(raw: String): List<ServerEntry> {
+        val trimmed = raw.removePrefix("\uFEFF").trim()
+        if (trimmed.isEmpty()) {
+            throw ServerParseException("The remote response is empty")
+        }
+
+        var jsonFailure: Exception? = null
+        try {
+            return ServerListParser.parseJson(trimmed)
+        } catch (error: Exception) {
+            jsonFailure = error
+        }
+
+        val decoded = decodeBase64Payload(trimmed)
+        if (decoded != null) {
+            val decodedServers = runCatching {
+                try {
+                    ServerListParser.parseJson(decoded)
+                } catch (_: Exception) {
+                    ServerListParser.parseProxyLinks(decoded)
+                }
+            }.getOrNull().orEmpty()
+            if (decodedServers.isNotEmpty()) return decodedServers
+        }
+
+        val plainTextServers = ServerListParser.parseProxyLinks(trimmed)
+        if (plainTextServers.isNotEmpty()) return plainTextServers
+
+        val preview = raw.take(100)
+        throw ServerParseException(
+            "Unable to parse remote server list. First 100 characters: \"$preview\"",
+            jsonFailure,
+        )
+    }
+
+    private fun decodeBase64Payload(raw: String): String? {
+        val candidate = raw
+            .substringAfter("base64,", raw)
+            .filterNot { it.isWhitespace() }
+        if (candidate.length < 16 || !BASE64_PATTERN.matches(candidate)) return null
+
+        val padded = candidate + "=".repeat((4 - candidate.length % 4) % 4)
+        val bytes = runCatching { Base64.getDecoder().decode(padded) }
+            .recoverCatching { Base64.getUrlDecoder().decode(padded) }
+            .getOrNull()
+            ?: return null
+        val decoded = runCatching { String(bytes, Charsets.UTF_8) }.getOrNull() ?: return null
+        if (decoded.contains('\uFFFD')) return null
+
+        val normalized = decoded.removePrefix("\uFEFF").trim()
+        return decoded.takeIf {
+            normalized.contains("://") ||
+                normalized.startsWith("[") ||
+                normalized.startsWith("{")
         }
     }
 
@@ -150,5 +222,6 @@ class ServerRepository(
         const val CACHE_FILE = "servers_cache.json"
         const val MAX_PAYLOAD_BYTES = 5 * 1024 * 1024
         const val USER_AGENT = "PulseRoute/0.1 (Android)"
+        val BASE64_PATTERN = Regex("""^[A-Za-z0-9+/=_-]+$""")
     }
 }

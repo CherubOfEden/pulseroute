@@ -63,7 +63,7 @@ fun SettingsScreen(
     var syncing by remember { mutableStateOf(false) }
 
     val engineReady = remember {
-        runCatching { System.loadLibrary("libbox") }.isSuccess
+        loadLibboxNativeLibrary()
     }
     val versionName = remember {
         runCatching {
@@ -265,4 +265,16 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(8.dp))
     }
+}
+
+private fun loadLibboxNativeLibrary(): Boolean {
+    for (library in listOf("box", "libbox")) {
+        try {
+            System.loadLibrary(library)
+            return true
+        } catch (_: LinkageError) {
+        } catch (_: SecurityException) {
+        }
+    }
+    return false
 }

@@ -52,7 +52,7 @@ object ServerListParser {
         }
     }
 
-    private fun parseJson(payload: String): List<ServerEntry> {
+    fun parseJson(payload: String): List<ServerEntry> {
         val extracted = JsConfigExtractor.extract(payload)
         val element = try {
             json.parseToJsonElement(extracted)
@@ -84,7 +84,7 @@ object ServerListParser {
         return servers
     }
 
-    private fun parseProxyLinks(payload: String): List<ServerEntry> =
+    fun parseProxyLinks(payload: String): List<ServerEntry> =
         payload.lineSequence()
             .map { it.trim().removePrefix("\uFEFF") }
             .filter { line ->
@@ -98,12 +98,23 @@ object ServerListParser {
 
     private fun parseProxyLink(line: String): ServerEntry? {
         val trimmed = line.trim().removePrefix("\uFEFF")
+        val lower = trimmed.lowercase()
+        val start = proxySchemes
+            .map { lower.indexOf(it) }
+            .filter { it >= 0 }
+            .minOrNull()
+            ?: return null
+        val candidate = trimmed.substring(start)
+            .trim()
+            .trim('"', '\'', ',', ';')
         return when {
-            trimmed.startsWith("vmess://", ignoreCase = true) -> parseVmessLink(trimmed)
-            trimmed.startsWith("vless://", ignoreCase = true) -> parseVlessLink(trimmed)
+            candidate.startsWith("vmess://", ignoreCase = true) -> parseVmessLink(candidate)
+            candidate.startsWith("vless://", ignoreCase = true) -> parseVlessLink(candidate)
             else -> null
         }
     }
+
+    private val proxySchemes = listOf("vmess://", "vless://")
 
     private fun parseVmessLink(link: String): ServerEntry? {
         val encoded = link.substringAfter("://", "").substringBefore('#').trim()
