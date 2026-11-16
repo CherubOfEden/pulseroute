@@ -12,8 +12,11 @@ import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -24,7 +27,7 @@ class ServerRepository(
     context: Context,
     private val okHttpClient: OkHttpClient,
     private val json: Json,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
 ) {
     private val cacheFile = File(context.applicationContext.filesDir, CACHE_FILE)
     private val _servers = MutableStateFlow<List<ServerEntry>>(emptyList())
@@ -32,6 +35,14 @@ class ServerRepository(
 
     val servers: StateFlow<List<ServerEntry>> = _servers.asStateFlow()
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
+    val networkOptions: StateFlow<List<String>> = _servers
+        .map { entries -> entries.mapNotNull { it.networkLabel }.distinctAndSorted() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val locationOptions: StateFlow<List<String>> = _servers
+        .map { entries -> entries.mapNotNull { it.locationLabel }.distinctAndSorted() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val loadJob = scope.launch(Dispatchers.IO) { loadCache() }
 
@@ -225,3 +236,6 @@ class ServerRepository(
         val BASE64_PATTERN = Regex("""^[A-Za-z0-9+/=_-]+$""")
     }
 }
+
+private fun List<String>.distinctAndSorted(): List<String> =
+    distinctBy { it.lowercase() }.sortedBy { it.lowercase() }

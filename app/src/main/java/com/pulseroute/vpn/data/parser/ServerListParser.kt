@@ -136,9 +136,9 @@ object ServerListParser {
             ?.takeIf { it.isNotEmpty() }
             ?: return null
 
-        val network = source.string("net", "network")
+        val transportNetwork = source.string("net", "network")
         val transport = TransportOptions(
-            type = transportType(network?.lowercase()),
+            type = transportType(transportNetwork?.lowercase()),
             path = source.string("path"),
             host = source.string("host", "hostHeader")?.takeIf { it.isNotBlank() },
             serviceName = source.string("serviceName", "service_name")
@@ -167,6 +167,8 @@ object ServerListParser {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?: "$host:$port"
+        val serverNetwork = source.networkProvider()
+        val location = source.locationName()
         val security = source.string("scy", "security", "cipher")
             ?.lowercase()
             ?.takeIf { it.isNotBlank() && it !in setOf("tls", "reality", "none") }
@@ -178,6 +180,8 @@ object ServerListParser {
             protocol = Protocol.VMESS,
             address = host,
             port = port,
+            location = location,
+            network = serverNetwork,
             vmess = VmessOptions(
                 uuid = uuid,
                 alterId = source.int("aid", "alterId", "alter_id") ?: 0,
@@ -247,6 +251,12 @@ object ServerListParser {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?: "$host:$port"
+        val network = listOf("networkname", "operator", "carrier", "isp", "provider", "sim")
+            .firstNotNullOfOrNull { params[it]?.trim()?.takeIf(String::isNotEmpty) }
+            ?: params["network"]?.trim()
+                ?.takeIf { it.isNotEmpty() && it.lowercase() !in transportNames }
+        val location = listOf("location", "city", "region", "countryname", "country_name")
+            .firstNotNullOfOrNull { params[it]?.trim()?.takeIf(String::isNotEmpty) }
 
         return ServerEntry(
             id = stableId("${Protocol.VLESS.name}|$host|$port|$uuid"),
@@ -254,6 +264,8 @@ object ServerListParser {
             protocol = Protocol.VLESS,
             address = host,
             port = port,
+            location = location,
+            network = network,
             vless = VlessOptions(
                 uuid = uuid,
                 flow = params["flow"]?.takeIf { it.isNotBlank() },
@@ -322,6 +334,47 @@ object ServerListParser {
         else -> null
     }
 
+    private fun JsonObject.networkProvider(): String? {
+        val explicit = string(
+            "networkName",
+            "network_name",
+            "networkGroup",
+            "network_group",
+            "operator",
+            "operatorName",
+            "carrier",
+            "carrierName",
+            "isp",
+            "provider",
+            "sim",
+            "mobileNetwork",
+            "mobile_network",
+        )?.cleanLabel()
+        if (explicit != null) return explicit
+
+        return string("network", "net", "transport")
+            ?.cleanLabel()
+            ?.takeUnless { it.lowercase() in transportNames }
+    }
+
+    private fun JsonObject.locationName(): String? {
+        string(
+            "location",
+            "city",
+            "region",
+            "countryName",
+            "country_name",
+            "state",
+        )?.cleanLabel()?.let { return it }
+
+        return string("country")
+            ?.cleanLabel()
+            ?.takeUnless { it.length == 2 && it.all(Char::isLetter) }
+    }
+
+    private fun String.cleanLabel(): String? =
+        trim().takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+
     private fun findServerArray(element: JsonObject): JsonArray? {
         for (key in arrayContainers) {
             when (val value = element[key]) {
@@ -376,14 +429,15 @@ object ServerListParser {
             ?: inferProtocol(source, uuid)
             ?: return null
 
-        val network = (
+        val transportNetwork = (
             source.string("network", "net", "transport")
                 ?: stream?.string("network")
                 ?: source.string("type")?.takeIf { it.lowercase() in transportNames }
             )?.lowercase()
+        val serverNetwork = source.networkProvider()
 
         val transport = TransportOptions(
-            type = transportType(network),
+            type = transportType(transportNetwork),
             path = ws?.string("path") ?: source.string("path", "wsPath"),
             host = ws?.obj("headers")?.string("Host", "host", "HostHeader")
                 ?: source.string("hostHeader", "wsHost", "host"),
@@ -433,8 +487,9 @@ object ServerListParser {
             ?.trim()
             ?.uppercase()
             ?.takeIf { it.length == 2 && it.all { char -> char.isLetter() } }
+        val location = source.locationName()
 
-        val group = source.string("group", "category", "serverGroup", "networkGroup")
+        val group = source.string("group", "category", "serverGroup")
         val latency = source.int("latency", "latencyMs", "ping", "delay")
 
         val idSeed = buildString {
@@ -457,6 +512,8 @@ object ServerListParser {
                     address = host,
                     port = port,
                     countryCode = countryCode,
+                    location = location,
+                    network = serverNetwork,
                     group = group,
                     latencyMs = latency,
                     vmess = VmessOptions(
@@ -481,6 +538,8 @@ object ServerListParser {
                     address = host,
                     port = port,
                     countryCode = countryCode,
+                    location = location,
+                    network = serverNetwork,
                     group = group,
                     latencyMs = latency,
                     vless = VlessOptions(
@@ -514,6 +573,8 @@ object ServerListParser {
                     address = host,
                     port = port,
                     countryCode = countryCode,
+                    location = location,
+                    network = serverNetwork,
                     group = group,
                     latencyMs = latency,
                     wireGuard = WireGuardOptions(
@@ -573,7 +634,17 @@ object ServerListParser {
         else -> TransportType.TCP
     }
 
-    private val transportNames = setOf("tcp", "ws", "websocket", "grpc", "gun", "http", "h2", "http2")
+    private val transportNames = setOf(
+        "tcp",
+        "ws",
+        "websocket",
+        "grpc",
+        "gun",
+        "http",
+        "httpupgrade",
+        "h2",
+        "http2",
+    )
 
     private fun stableId(seed: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(Charsets.UTF_8))

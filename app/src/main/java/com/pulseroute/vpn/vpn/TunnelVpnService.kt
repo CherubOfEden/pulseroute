@@ -5,7 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.net.IpPrefix
 import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
@@ -21,7 +21,9 @@ import com.pulseroute.vpn.engine.ProxyEngine
 import com.pulseroute.vpn.engine.VpnPlatform
 import com.pulseroute.vpn.routing.GeoAssetInstaller
 import com.pulseroute.vpn.routing.RoutingOptions
+import io.nekohasekai.libbox.TunOptions
 import java.io.IOException
+import java.net.InetAddress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -123,14 +125,14 @@ class TunnelVpnService : VpnService() {
                 mtu = settings.mtu,
             )
 
-            val mtu = settings.mtu
-            val vpnEngine = LibboxProxyEngine()
+            val vpnEngine = LibboxProxyEngine(this)
             engine = vpnEngine
 
             vpnEngine.start(
                 configJson = configJson,
                 platform = object : VpnPlatform {
-                    override fun establishTun(): ParcelFileDescriptor = establishTunInterface(mtu)
+                    override fun establishTun(options: TunOptions): ParcelFileDescriptor =
+                        establishTunInterface(options)
 
                     override fun protectSocket(fd: Int): Boolean = protect(fd)
                 },
@@ -195,25 +197,106 @@ class TunnelVpnService : VpnService() {
     private fun uidRxBytes(): Long =
         TrafficStats.getUidRxBytes(Process.myUid()).coerceAtLeast(0L)
 
-    private fun establishTunInterface(mtu: Int): ParcelFileDescriptor {
+    private fun establishTunInterface(options: TunOptions): ParcelFileDescriptor {
         val builder = Builder()
             .setSession("PulseRoute")
-            .setMtu(mtu.coerceIn(1280, 9000))
-            .addAddress("172.19.0.1", 30)
-            .addAddress("fdfe:dcba:9876::1", 126)
-            .addRoute("0.0.0.0", 0)
-            .addRoute("::", 0)
-            .addDnsServer("1.1.1.1")
+            .setMtu(options.mtu.coerceIn(1280, 9000))
             .setBlocking(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
         }
 
-        try {
-            builder.addDisallowedApplication(packageName)
-        } catch (_: PackageManager.NameNotFoundException) {
-            // Should not happen, but the tunnel is still usable.
+        var hasIpv4 = false
+        val inet4Address = options.inet4Address
+        while (inet4Address.hasNext()) {
+            val prefix = inet4Address.next()
+            builder.addAddress(prefix.address(), prefix.prefix())
+            hasIpv4 = true
+        }
+
+        var hasIpv6 = false
+        val inet6Address = options.inet6Address
+        while (inet6Address.hasNext()) {
+            val prefix = inet6Address.next()
+            builder.addAddress(prefix.address(), prefix.prefix())
+            hasIpv6 = true
+        }
+
+        val includedPackages = mutableSetOf<String>()
+        if (options.autoRoute) {
+            val dnsServer = runCatching { options.dnsServerAddress }.getOrNull()
+            dnsServer?.value?.takeIf { it.isNotBlank() }?.let(builder::addDnsServer)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val inet4RouteAddress = options.inet4RouteAddress
+                var hasIpv4Route = false
+                while (inet4RouteAddress.hasNext()) {
+                    builder.addRoute(inet4RouteAddress.next().toIpPrefix())
+                    hasIpv4Route = true
+                }
+                if (!hasIpv4Route && hasIpv4) {
+                    builder.addRoute("0.0.0.0", 0)
+                }
+
+                val inet6RouteAddress = options.inet6RouteAddress
+                var hasIpv6Route = false
+                while (inet6RouteAddress.hasNext()) {
+                    builder.addRoute(inet6RouteAddress.next().toIpPrefix())
+                    hasIpv6Route = true
+                }
+                if (!hasIpv6Route && hasIpv6) {
+                    builder.addRoute("::", 0)
+                }
+
+                val inet4RouteExcludeAddress = options.inet4RouteExcludeAddress
+                while (inet4RouteExcludeAddress.hasNext()) {
+                    builder.excludeRoute(inet4RouteExcludeAddress.next().toIpPrefix())
+                }
+
+                val inet6RouteExcludeAddress = options.inet6RouteExcludeAddress
+                while (inet6RouteExcludeAddress.hasNext()) {
+                    builder.excludeRoute(inet6RouteExcludeAddress.next().toIpPrefix())
+                }
+            } else {
+                val inet4RouteRange = options.inet4RouteRange
+                var hasIpv4Route = false
+                while (inet4RouteRange.hasNext()) {
+                    val prefix = inet4RouteRange.next()
+                    builder.addRoute(prefix.address(), prefix.prefix())
+                    hasIpv4Route = true
+                }
+                if (!hasIpv4Route && hasIpv4) {
+                    builder.addRoute("0.0.0.0", 0)
+                }
+
+                val inet6RouteRange = options.inet6RouteRange
+                var hasIpv6Route = false
+                while (inet6RouteRange.hasNext()) {
+                    val prefix = inet6RouteRange.next()
+                    builder.addRoute(prefix.address(), prefix.prefix())
+                    hasIpv6Route = true
+                }
+                if (!hasIpv6Route && hasIpv6) {
+                    builder.addRoute("::", 0)
+                }
+            }
+
+            val includePackage = options.includePackage
+            while (includePackage.hasNext()) {
+                val includedPackage = includePackage.next()
+                includedPackages += includedPackage
+                runCatching { builder.addAllowedApplication(includedPackage) }
+            }
+
+            val excludePackage = options.excludePackage
+            while (excludePackage.hasNext()) {
+                runCatching { builder.addDisallowedApplication(excludePackage.next()) }
+            }
+        }
+
+        if (includedPackages.isEmpty()) {
+            runCatching { builder.addDisallowedApplication(packageName) }
         }
 
         val descriptor = builder.establish()
@@ -225,6 +308,9 @@ class TunnelVpnService : VpnService() {
         }
         return descriptor
     }
+
+    private fun io.nekohasekai.libbox.RoutePrefix.toIpPrefix(): IpPrefix =
+        IpPrefix(InetAddress.getByName(address()), prefix())
 
     private fun fail(message: String) {
         VpnStateHolder.updateStatus(VpnStatus.Error(message))

@@ -1,178 +1,348 @@
 package com.pulseroute.vpn.engine
 
-import android.os.ParcelFileDescriptor
-import java.lang.reflect.InvocationHandler
-import java.lang.reflect.InvocationTargetException
-import java.lang.reflect.Method
-import java.lang.reflect.Proxy
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.os.Build
+import android.os.Process
+import android.system.OsConstants
+import go.Seq
+import io.nekohasekai.libbox.CommandServer
+import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.LocalDNSTransport
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.Notification
+import io.nekohasekai.libbox.OverrideOptions
+import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.SetupOptions
+import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.SystemProxyStatus
+import io.nekohasekai.libbox.TunOptions
+import io.nekohasekai.libbox.WIFIState
+import java.io.File
+import java.io.IOException
+import java.net.Inet6Address
+import java.net.InetSocketAddress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 
-/**
- * Thin reflective adapter around sing-box's `libbox.aar`.
- *
- * The AAR is optional at build time. This keeps the repository compilable and
- * makes the engine version explicit at integration time. Drop a matching
- * libbox.aar into app/libs to enable the engine.
- */
-class LibboxProxyEngine : ProxyEngine {
+class LibboxProxyEngine(context: Context) : ProxyEngine {
+
+    private val appContext = context.applicationContext ?: context
 
     @Volatile
-    private var service: Any? = null
+    private var commandServer: CommandServer? = null
 
     override suspend fun start(configJson: String, platform: VpnPlatform) {
         withContext(Dispatchers.IO) {
-            check(service == null) { "Engine is already running" }
-
-            val libboxClass = loadClass(LIBBOX_CLASS)
-            val platformInterface = loadClass(PLATFORM_CLASS)
-            require(platformInterface.isInterface) { "$PLATFORM_CLASS is not an interface" }
-
-            val platformProxy = Proxy.newProxyInstance(
-                platformInterface.classLoader,
-                arrayOf(platformInterface),
-                PlatformInvocationHandler(platform),
-            )
-
-            val factory = libboxClass.methods.firstOrNull {
-                (it.name == "newService" || it.name == "newCommandServer") &&
-                    it.parameterCount == 2 &&
-                    it.parameterTypes.any { type -> type == String::class.java } &&
-                    it.parameterTypes.any { type -> type.isInstance(platformProxy) }
-            } ?: throw EngineUnavailableException(
-                "Unsupported libbox version: no newService/newCommandServer(String, PlatformInterface)",
-            )
-
-            val libboxInstance = runCatching {
-                libboxClass.getField("INSTANCE").get(null)
-            }.getOrNull()
-
-            val arguments = if (factory.parameterTypes[0] == String::class.java) {
-                arrayOf(configJson, platformProxy)
-            } else {
-                arrayOf(platformProxy, configJson)
-            }
-
-            val created = try {
-                factory.invoke(libboxInstance, *arguments)
-            } catch (error: InvocationTargetException) {
-                throw EngineUnavailableException(
-                    "libbox rejected the configuration: ${error.targetException.message}",
-                    error.targetException,
-                )
-            } ?: throw EngineUnavailableException("libbox returned a null service")
-
-            val startMethod = created.javaClass.methods.firstOrNull {
-                it.name == "start" && it.parameterCount == 0
-            } ?: created.javaClass.methods.firstOrNull {
-                it.name == "start" &&
-                    it.parameterCount == 1 &&
-                    it.parameterTypes[0].isInstance(platformProxy)
-            } ?: throw EngineUnavailableException("libbox service has no supported start() method")
+            check(commandServer == null) { "Engine is already running" }
 
             try {
-                if (startMethod.parameterCount == 0) {
-                    startMethod.invoke(created)
-                } else {
-                    startMethod.invoke(created, platformProxy)
-                }
-            } catch (error: InvocationTargetException) {
-                runCatching { closeService(created) }
+                ensureLibboxSetup(appContext)
+            } catch (error: Throwable) {
                 throw EngineUnavailableException(
-                    "libbox failed to start: ${error.targetException.message}",
-                    error.targetException,
+                    "libbox native library is unavailable: ${error.message}",
+                    error,
                 )
             }
 
-            service = created
+            val handler = object : CommandServerHandler {
+                override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
+
+                override fun serviceReload() = Unit
+
+                override fun serviceStop() = Unit
+
+                override fun setSystemProxyEnabled(enabled: Boolean) = Unit
+
+                override fun writeDebugMessage(message: String) = Unit
+            }
+            val platformInterface = AndroidPlatformInterface(appContext, platform)
+
+            val server = try {
+                Libbox.newCommandServer(handler, platformInterface)
+            } catch (error: Throwable) {
+                throw EngineUnavailableException(
+                    "libbox 1.13.11 could not create the command server: ${error.message}",
+                    error,
+                )
+            } ?: throw EngineUnavailableException("libbox returned a null command server")
+
+            try {
+                server.startOrReloadService(
+                    configJson,
+                    OverrideOptions().apply { autoRedirect = false },
+                )
+            } catch (error: Throwable) {
+                runCatching { server.closeService() }
+                runCatching { server.close() }
+                throw EngineUnavailableException(
+                    "libbox failed to start: ${error.message}",
+                    error,
+                )
+            }
+
+            commandServer = server
         }
     }
 
     override fun stop() {
-        val current = service ?: return
-        service = null
-        closeService(current)
+        val current = commandServer ?: return
+        commandServer = null
+        runCatching { current.closeService() }
+        runCatching { current.close() }
     }
 
-    private fun closeService(target: Any) {
-        val closeMethod = target.javaClass.methods.firstOrNull {
-            (it.name == "close" || it.name == "stop") && it.parameterCount == 0
-        } ?: return
-        try {
-            closeMethod.invoke(target)
-        } catch (_: Exception) {
-            // Best-effort shutdown; the TUN descriptor is closed by the service.
-        }
-    }
-
-    private fun loadClass(name: String): Class<*> = try {
-        Class.forName(name)
-    } catch (error: ClassNotFoundException) {
-        throw EngineUnavailableException(
-            "$name is missing. Add a compatible libbox.aar to app/libs.",
-            error,
-        )
-    }
-
-    private class PlatformInvocationHandler(
+    private class AndroidPlatformInterface(
+        private val context: Context,
         private val platform: VpnPlatform,
-    ) : InvocationHandler {
+    ) : PlatformInterface {
 
-        override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
-            return when (method.name) {
-                "openTun" -> {
-                    val descriptor = platform.establishTun()
-                    if (method.returnType == Int::class.javaPrimitiveType) {
-                        descriptor.fd
-                    } else {
-                        descriptor
-                    }
-                }
+        private val connectivityManager =
+            context.getSystemService(ConnectivityManager::class.java)
 
-                "autoDetectInterfaceControl" -> {
-                    val fd = (args?.firstOrNull() as? Number)?.toInt()
-                    val protected = fd != null && platform.protectSocket(fd)
-                    if (method.returnType == java.lang.Boolean.TYPE) protected else null
-                }
+        private var interfaceListener: InterfaceUpdateListener? = null
+        private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-                "usePlatformAutoDetectInterfaceControl",
-                "useProcFS",
-                -> true
-
-                "underNetworkExtension",
-                "includeAllNetworks",
-                -> false
-
-                "packageNameByUid" -> ""
-
-                "uidByPackageName" -> -1
-
-                "toString" -> "PulseRouteVpnPlatform"
-
-                "hashCode" -> System.identityHashCode(proxy)
-
-                "equals" -> proxy === args?.firstOrNull()
-
-                else -> defaultValue(method.returnType)
+        override fun autoDetectInterfaceControl(fd: Int) {
+            if (!platform.protectSocket(fd)) {
+                throw IOException("Could not protect socket $fd")
             }
         }
 
-        private fun defaultValue(type: Class<*>): Any? = when (type) {
-            java.lang.Boolean.TYPE -> false
-            java.lang.Byte.TYPE -> 0.toByte()
-            java.lang.Short.TYPE -> 0.toShort()
-            java.lang.Integer.TYPE -> 0
-            java.lang.Long.TYPE -> 0L
-            java.lang.Float.TYPE -> 0f
-            java.lang.Double.TYPE -> 0.0
-            java.lang.Character.TYPE -> '\u0000'
-            ParcelFileDescriptor::class.java -> null
-            else -> null
+        override fun clearDNSCache() = Unit
+
+        @Synchronized
+        override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
+            interfaceListener = null
+            val callback = networkCallback
+            networkCallback = null
+            if (callback != null) {
+                runCatching { connectivityManager?.unregisterNetworkCallback(callback) }
+            }
+        }
+
+        override fun findConnectionOwner(
+            ipProtocol: Int,
+            sourceAddress: String,
+            sourcePort: Int,
+            destinationAddress: String,
+            destinationPort: Int,
+        ): ConnectionOwner {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                throw UnsupportedOperationException("Connection owners require Android 10")
+            }
+
+            val manager = connectivityManager
+                ?: throw IOException("Connectivity service is unavailable")
+            val uid = manager.getConnectionOwnerUid(
+                ipProtocol,
+                InetSocketAddress(sourceAddress, sourcePort),
+                InetSocketAddress(destinationAddress, destinationPort),
+            )
+            if (uid == Process.INVALID_UID) {
+                throw IOException("Connection owner was not found")
+            }
+
+            val packages = context.packageManager.getPackagesForUid(uid).orEmpty()
+            return ConnectionOwner().apply {
+                userId = uid
+                userName = packages.firstOrNull().orEmpty()
+                setAndroidPackageNames(StringArray(packages.iterator()))
+            }
+        }
+
+        override fun getInterfaces(): NetworkInterfaceIterator {
+            val interfaces = mutableListOf<LibboxNetworkInterface>()
+            val enumeration = runCatching {
+                java.net.NetworkInterface.getNetworkInterfaces()
+            }.getOrNull()
+
+            while (enumeration != null && enumeration.hasMoreElements()) {
+                val networkInterface = enumeration.nextElement()
+                if (!networkInterface.isUp) continue
+
+                val item = LibboxNetworkInterface().apply {
+                    name = networkInterface.name
+                    index = networkInterface.safeIndex()
+                    mtu = runCatching { networkInterface.mtu }.getOrDefault(1500)
+                    flags = networkInterface.linkFlags()
+                    type = networkInterface.interfaceType()
+                    addresses = StringArray(
+                        networkInterface.interfaceAddresses
+                            .mapNotNull { it.toPrefix() }
+                            .iterator(),
+                    )
+                    dnsServer = StringArray(emptyList<String>().iterator())
+                    metered = false
+                }
+                interfaces += item
+            }
+
+            return NetworkInterfaceArray(interfaces.iterator())
+        }
+
+        override fun includeAllNetworks(): Boolean = false
+
+        override fun localDNSTransport(): LocalDNSTransport? = null
+
+        override fun openTun(options: TunOptions): Int = platform.establishTun(options).fd
+
+        override fun readWIFIState(): WIFIState? = null
+
+        override fun sendNotification(notification: Notification) = Unit
+
+        @Synchronized
+        override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
+            interfaceListener = listener
+            val manager = connectivityManager ?: return
+
+            networkCallback?.let { previous ->
+                runCatching { manager.unregisterNetworkCallback(previous) }
+            }
+
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    notifyDefaultInterface(network)
+                }
+
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    networkCapabilities: NetworkCapabilities,
+                ) {
+                    notifyDefaultInterface(network)
+                }
+            }
+            networkCallback = callback
+            runCatching { manager.registerDefaultNetworkCallback(callback) }
+            runCatching { manager.activeNetwork?.let(::notifyDefaultInterface) }
+        }
+
+        override fun systemCertificates(): StringIterator =
+            StringArray(emptyList<String>().iterator())
+
+        override fun underNetworkExtension(): Boolean = false
+
+        override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
+
+        override fun useProcFS(): Boolean = false
+
+        @Synchronized
+        private fun notifyDefaultInterface(network: Network) {
+            val listener = interfaceListener ?: return
+            val manager = connectivityManager ?: return
+            val linkProperties = runCatching {
+                manager.getLinkProperties(network)
+            }.getOrNull() ?: return
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+            val name = linkProperties.interfaceName ?: return
+            val capabilities = runCatching {
+                manager.getNetworkCapabilities(network)
+            }.getOrNull()
+            val expensive = capabilities?.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+            ) == false
+            val index = java.net.NetworkInterface.getByName(name)?.safeIndex() ?: 0
+
+            runCatching {
+                listener.updateDefaultInterface(name, index, expensive, false)
+            }
+        }
+
+        private fun java.net.NetworkInterface.safeIndex(): Int =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                runCatching { index }.getOrDefault(0)
+            } else {
+                0
+            }
+
+        private fun java.net.NetworkInterface.linkFlags(): Int {
+            var flags = 0
+            if (isUp) flags = flags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+            if (isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+            if (isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+            if (runCatching { supportsMulticast() }.getOrDefault(false)) {
+                flags = flags or OsConstants.IFF_MULTICAST
+            }
+            return flags
+        }
+
+        private fun java.net.NetworkInterface.interfaceType(): Int = when {
+            name.startsWith("wlan") || name.startsWith("wifi") -> Libbox.InterfaceTypeWIFI
+            name.startsWith("rmnet") ||
+                name.startsWith("ccmni") ||
+                name.startsWith("pdp") ||
+                name.startsWith("wwan") -> Libbox.InterfaceTypeCellular
+
+            name.startsWith("eth") -> Libbox.InterfaceTypeEthernet
+            else -> Libbox.InterfaceTypeOther
+        }
+
+        private fun java.net.InterfaceAddress.toPrefix(): String? {
+            val host = when (val value = address) {
+                is Inet6Address -> runCatching {
+                    Inet6Address.getByAddress(value.address).hostAddress
+                }.getOrNull()
+
+                else -> value.hostAddress
+            } ?: return null
+            return "$host/$networkPrefixLength"
         }
     }
 
+    private class StringArray(
+        private val iterator: Iterator<String>,
+    ) : StringIterator {
+        override fun len(): Int = 0
+
+        override fun hasNext(): Boolean = iterator.hasNext()
+
+        override fun next(): String = iterator.next()
+    }
+
+    private class NetworkInterfaceArray(
+        private val iterator: Iterator<LibboxNetworkInterface>,
+    ) : NetworkInterfaceIterator {
+        override fun hasNext(): Boolean = iterator.hasNext()
+
+        override fun next(): LibboxNetworkInterface = iterator.next()
+    }
+
     private companion object {
-        const val LIBBOX_CLASS = "io.nekohasekai.libbox.Libbox"
-        const val PLATFORM_CLASS = "io.nekohasekai.libbox.PlatformInterface"
+        @Volatile
+        private var setupCompleted = false
+
+        private val setupLock = Any()
+
+        fun ensureLibboxSetup(context: Context) {
+            if (setupCompleted) return
+            synchronized(setupLock) {
+                if (setupCompleted) return
+
+                val baseDir = File(context.filesDir, "libbox").apply { mkdirs() }
+                val workingDir = File(context.filesDir, "libbox-work").apply { mkdirs() }
+                val tempDir = File(context.cacheDir, "libbox").apply { mkdirs() }
+
+                Seq.setContext(context)
+                Libbox.setup(
+                    SetupOptions().apply {
+                        basePath = baseDir.absolutePath
+                        workingPath = workingDir.absolutePath
+                        tempPath = tempDir.absolutePath
+                        fixAndroidStack = true
+                        commandServerListenPort = 0
+                        commandServerSecret = ""
+                        logMaxLines = 0L
+                        debug = false
+                    },
+                )
+                setupCompleted = true
+            }
+        }
     }
 }

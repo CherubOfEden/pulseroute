@@ -74,6 +74,33 @@ class ServerListParserTest {
     }
 
     @Test
+    fun parsesNetworkAndLocationWithoutConfusingTransport() {
+        val payload = """
+            [
+              {
+                "name": "MCI Tehran",
+                "address": "mci.example.com",
+                "port": 443,
+                "type": "vless",
+                "id": "55555555-5555-4555-8555-555555555555",
+                "network": "ws",
+                "path": "/ws",
+                "operator": "MCI",
+                "location": "Tehran"
+              }
+            ]
+        """.trimIndent()
+
+        val server = ServerListParser.parse(payload).single()
+
+        assertEquals(TransportType.WS, server.vless?.transport?.type)
+        assertEquals("MCI", server.network)
+        assertEquals("Tehran", server.location)
+        assertEquals("MCI", server.networkLabel)
+        assertEquals("Tehran", server.locationLabel)
+    }
+
+    @Test
     fun parsesWireGuardEntry() {
         val payload = """
             {

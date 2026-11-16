@@ -91,7 +91,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
-    // sing-box libbox AAR from JitPack. The engine bridge loads it reflectively.
+    // sing-box libbox AAR from JitPack.
     implementation("com.github.singbox-android:libbox:1.13.11")
 
     testImplementation(libs.junit)

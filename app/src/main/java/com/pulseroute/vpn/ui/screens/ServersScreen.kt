@@ -3,6 +3,7 @@ package com.pulseroute.vpn.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -61,24 +64,41 @@ fun ServersScreen(container: AppContainer) {
     val scope = rememberCoroutineScope()
 
     val servers by container.serverRepository.servers.collectAsStateWithLifecycle()
+    val networkOptions by container.serverRepository.networkOptions.collectAsStateWithLifecycle()
+    val locationOptions by container.serverRepository.locationOptions.collectAsStateWithLifecycle()
     val settings by container.settingsRepository.settings
         .collectAsStateWithLifecycle(initialValue = UserSettings())
 
     var query by rememberSaveable { mutableStateOf("") }
+    var locationFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var importText by rememberSaveable { mutableStateOf("") }
     var importBusy by remember { mutableStateOf(false) }
     var syncing by remember { mutableStateOf(false) }
 
-    val filtered = remember(servers, query) {
-        if (query.isBlank()) {
-            servers
+    val selectedNetwork = settings.selectedNetwork
+    val availableNetworks = remember(networkOptions, selectedNetwork) {
+        if (selectedNetwork != null &&
+            networkOptions.none { it.equals(selectedNetwork, ignoreCase = true) }
+        ) {
+            listOf(selectedNetwork) + networkOptions
         } else {
-            servers.filter { server ->
+            networkOptions
+        }
+    }
+    val filtered = remember(servers, query, selectedNetwork, locationFilter) {
+        servers.filter { server ->
+            val matchesNetwork = selectedNetwork == null ||
+                server.network.equals(selectedNetwork, ignoreCase = true)
+            val matchesLocation = locationFilter == null ||
+                server.locationLabel.equals(locationFilter, ignoreCase = true)
+            val matchesQuery = query.isBlank() ||
                 server.name.contains(query, ignoreCase = true) ||
-                    server.address.contains(query, ignoreCase = true) ||
-                    server.countryCode?.contains(query, ignoreCase = true) == true
-            }
+                server.address.contains(query, ignoreCase = true) ||
+                server.networkLabel?.contains(query, ignoreCase = true) == true ||
+                server.locationLabel?.contains(query, ignoreCase = true) == true ||
+                server.group?.contains(query, ignoreCase = true) == true
+            matchesNetwork && matchesLocation && matchesQuery
         }
     }
 
@@ -138,6 +158,29 @@ fun ServersScreen(container: AppContainer) {
             placeholder = { Text(stringResource(R.string.search_servers)) },
             shape = MaterialTheme.shapes.medium,
         )
+
+        Spacer(Modifier.height(10.dp))
+
+        FilterRow(
+            label = stringResource(R.string.network_filter),
+            options = availableNetworks,
+            selected = selectedNetwork,
+            allLabel = stringResource(R.string.all_networks),
+            onSelect = { network ->
+                scope.launch { container.settingsRepository.setSelectedNetwork(network) }
+            },
+        )
+
+        if (locationOptions.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            FilterRow(
+                label = stringResource(R.string.location_filter),
+                options = locationOptions,
+                selected = locationFilter,
+                allLabel = stringResource(R.string.all_locations),
+                onSelect = { locationFilter = it },
+            )
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -309,6 +352,43 @@ fun ServersScreen(container: AppContainer) {
 }
 
 @Composable
+private fun FilterRow(
+    label: String,
+    options: List<String>,
+    selected: String?,
+    allLabel: String,
+    onSelect: (String?) -> Unit,
+) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = selected == null,
+                onClick = { onSelect(null) },
+                label = { Text(allLabel) },
+            )
+            options.forEach { option ->
+                FilterChip(
+                    selected = option.equals(selected, ignoreCase = true),
+                    onClick = { onSelect(option) },
+                    label = { Text(option) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ServerRow(
     server: ServerEntry,
     selected: Boolean,
@@ -374,7 +454,8 @@ private fun ServerRow(
                     val tls = server.vmess?.tls ?: server.vless?.tls
                     transport?.type?.name?.let(::add)
                     if (tls?.enabled == true) add("TLS")
-                    server.countryCode?.takeIf { it.isNotBlank() }?.let(::add)
+                    server.networkLabel?.let(::add)
+                    server.locationLabel?.let(::add)
                 }
                 if (details.isNotEmpty()) {
                     Text(

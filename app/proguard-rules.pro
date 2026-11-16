@@ -1,7 +1,10 @@
-# sing-box libbox is loaded reflectively from the optional AAR.
+# sing-box libbox and gomobile bindings.
 -keep class io.nekohasekai.libbox.** { *; }
 -keepclassmembers class io.nekohasekai.libbox.** { *; }
+-keep class go.** { *; }
+-keepclassmembers class go.** { *; }
 -dontwarn io.nekohasekai.libbox.**
+-dontwarn go.**
 
 # kotlinx.serialization models and generated serializers.
 -keepattributes *Annotation*, InnerClasses, Signature

@@ -19,6 +19,7 @@ class SettingsRepository(private val context: Context) {
         .map { preferences ->
             UserSettings(
                 selectedServerId = preferences[Keys.SELECTED_SERVER_ID],
+                selectedNetwork = preferences[Keys.SELECTED_NETWORK],
                 bypassLan = preferences[Keys.BYPASS_LAN] ?: true,
                 bypassCountry = preferences[Keys.BYPASS_COUNTRY] ?: false,
                 countryCode = preferences[Keys.COUNTRY_CODE] ?: "IR",
@@ -37,6 +38,16 @@ class SettingsRepository(private val context: Context) {
                 preferences.remove(Keys.SELECTED_SERVER_ID)
             } else {
                 preferences[Keys.SELECTED_SERVER_ID] = serverId
+            }
+        }
+    }
+
+    suspend fun setSelectedNetwork(network: String?) {
+        context.settingsDataStore.edit { preferences ->
+            if (network == null) {
+                preferences.remove(Keys.SELECTED_NETWORK)
+            } else {
+                preferences[Keys.SELECTED_NETWORK] = network
             }
         }
     }
@@ -71,6 +82,7 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val SELECTED_SERVER_ID = stringPreferencesKey("selected_server_id")
+        val SELECTED_NETWORK = stringPreferencesKey("selected_network")
         val BYPASS_LAN = booleanPreferencesKey("bypass_lan")
         val BYPASS_COUNTRY = booleanPreferencesKey("bypass_country")
         val COUNTRY_CODE = stringPreferencesKey("country_code")

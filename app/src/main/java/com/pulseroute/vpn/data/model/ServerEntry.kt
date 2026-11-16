@@ -91,6 +91,8 @@ data class ServerEntry(
     val address: String,
     val port: Int,
     val countryCode: String? = null,
+    val location: String? = null,
+    val network: String? = null,
     val group: String? = null,
     val latencyMs: Int? = null,
     val vmess: VmessOptions? = null,
@@ -99,6 +101,13 @@ data class ServerEntry(
 ) {
     val endpoint: String
         get() = "$address:$port"
+
+    val networkLabel: String?
+        get() = network?.trim()?.takeIf { it.isNotEmpty() }
+
+    val locationLabel: String?
+        get() = location?.trim()?.takeIf { it.isNotEmpty() }
+            ?: countryCode?.trim()?.takeIf { it.isNotEmpty() }
 
     fun hasRequiredCredentials(): Boolean = when (protocol) {
         Protocol.VMESS -> !vmess?.uuid.isNullOrBlank()

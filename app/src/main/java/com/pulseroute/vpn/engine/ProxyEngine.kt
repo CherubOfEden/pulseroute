@@ -1,9 +1,10 @@
 package com.pulseroute.vpn.engine
 
 import android.os.ParcelFileDescriptor
+import io.nekohasekai.libbox.TunOptions
 
 interface VpnPlatform {
-    fun establishTun(): ParcelFileDescriptor
+    fun establishTun(options: TunOptions): ParcelFileDescriptor
     fun protectSocket(fd: Int): Boolean
 }
 
