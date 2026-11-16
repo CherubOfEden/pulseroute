@@ -155,11 +155,13 @@ fun DashboardScreen(
             onManageServers = onManageServers,
         )
 
+        val currentStatus = status
+
         TrafficCard(
-            status = status,
+            status = currentStatus,
             traffic = traffic,
-            elapsedMillis = if (status is VpnStatus.Connected) {
-                (now - status.startedAtMillis).coerceAtLeast(0L)
+            elapsedMillis = if (currentStatus is VpnStatus.Connected) {
+                (now - currentStatus.startedAtMillis).coerceAtLeast(0L)
             } else {
                 0L
             },

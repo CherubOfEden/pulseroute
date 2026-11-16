@@ -75,7 +75,7 @@ class TunnelVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        stopTunnel("VPN permission was revoked")
+        stopTunnel()
         super.onRevoke()
     }
 
