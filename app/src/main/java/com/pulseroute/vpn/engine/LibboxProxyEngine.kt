@@ -63,7 +63,9 @@ class LibboxProxyEngine(context: Context) : ProxyEngine {
 
                 override fun setSystemProxyEnabled(enabled: Boolean) = Unit
 
-                override fun writeDebugMessage(message: String) = Log.d("LibboxProxyEngine", message)
+                override fun writeDebugMessage(message: String) {
+                    Log.d("LibboxProxyEngine", message)
+                }
             }
             val platformInterface = AndroidPlatformInterface(appContext, platform)
 
