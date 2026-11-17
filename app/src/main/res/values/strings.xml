@@ -56,7 +56,7 @@
     <string name="routing_subtitle">Choose what stays outside the tunnel and which geo rules apply.</string>
     <string name="geo_assets_info">Country and ad rules use bundled geoip/geosite databases. If only legacy .dat files are present, add sing-box .db files to app/src/main/assets/geo.</string>
     <string name="mtu">Tunnel MTU</string>
-    <string name="mtu_desc">1200–1500 is safe for most mobile networks. Default: 9000 for TUN overhead.</string>
+    <string name="mtu_desc">1280 is recommended for mobile networks. The allowed range is 1280–9000.</string>
     <string name="save_mtu">Save MTU</string>
     <string name="country_hint">Two-letter ISO code, e.g. IR</string>
     <string name="bypass_lan">Bypass local networks</string>
@@ -128,4 +128,8 @@
     <string name="cd_back">Back</string>
     <string name="cd_server_list">Open server list</string>
     <string name="cd_connection_toggle">Connection toggle</string>
+    <string name="settings_tools">Tools &amp; Data</string>
+    <string name="export_import">Export/Import</string>
+    <string name="troubleshooting">Troubleshooting</string>
+    <string name="usage_stats">Usage Stats</string>
 </resources>

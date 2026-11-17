@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Process
 import android.system.OsConstants
+import android.util.Log
 import go.Seq
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
@@ -45,12 +46,14 @@ class LibboxProxyEngine(context: Context) : ProxyEngine {
             try {
                 ensureLibboxSetup(appContext)
             } catch (error: Throwable) {
+                Log.e("LibboxProxyEngine", "Failed to load libbox", error)
                 throw EngineUnavailableException(
                     "libbox native library is unavailable: ${error.message}",
                     error,
                 )
             }
 
+            Log.d("LibboxProxyEngine", "Starting libbox proxy engine")
             val handler = object : CommandServerHandler {
                 override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
 
@@ -60,7 +63,7 @@ class LibboxProxyEngine(context: Context) : ProxyEngine {
 
                 override fun setSystemProxyEnabled(enabled: Boolean) = Unit
 
-                override fun writeDebugMessage(message: String) = Unit
+                override fun writeDebugMessage(message: String) = Log.d("LibboxProxyEngine", message)
             }
             val platformInterface = AndroidPlatformInterface(appContext, platform)
 

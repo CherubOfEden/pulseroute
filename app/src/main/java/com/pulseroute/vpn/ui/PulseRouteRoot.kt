@@ -139,10 +139,19 @@ fun PulseRouteRoot() {
             composable("routing") {
                 RoutingScreen(container = container)
             }
+            composable("troubleshooting") {
+                Text(stringResource(R.string.troubleshooting))
+            }
+            composable("usage") {
+                Text(stringResource(R.string.usage_stats))
+            }
             composable("settings") {
                 SettingsScreen(
                     container = container,
                     onOpenRouting = { navigateTo("routing") },
+                    onOpenServers = { navigateTo("servers") },
+                    onOpenTroubleshooting = { navigateTo("troubleshooting") },
+                    onOpenUsage = { navigateTo("usage") },
                 )
             }
         }

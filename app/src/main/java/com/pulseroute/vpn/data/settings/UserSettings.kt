@@ -8,5 +8,5 @@ data class UserSettings(
     val countryCode: String = "IR",
     val blockAds: Boolean = false,
     val remoteServersUrl: String = "",
-    val mtu: Int = 9000,
+    val mtu: Int = 1280,
 )

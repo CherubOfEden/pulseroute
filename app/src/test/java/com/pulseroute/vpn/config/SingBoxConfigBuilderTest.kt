@@ -6,6 +6,8 @@ import com.pulseroute.vpn.data.model.TlsOptions
 import com.pulseroute.vpn.data.model.TransportOptions
 import com.pulseroute.vpn.data.model.TransportType
 import com.pulseroute.vpn.data.model.VlessOptions
+import com.pulseroute.vpn.data.model.VmessOptions
+import com.pulseroute.vpn.data.settings.UserSettings
 import com.pulseroute.vpn.routing.GeoAssets
 import com.pulseroute.vpn.routing.RoutingOptions
 import kotlinx.serialization.json.Json
@@ -68,6 +70,27 @@ class SingBoxConfigBuilderTest {
             "tokyo.example.com",
             proxy["tls"]!!.jsonObject["server_name"]!!.jsonPrimitive.content,
         )
+        assertEquals("true", proxy["mux"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+        assertEquals(4, proxy["mux"]!!.jsonObject["concurrency"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun buildsVmessOutboundWithMux() {
+        val server = ServerEntry(
+            id = "id",
+            name = "Tokyo",
+            protocol = Protocol.VMESS,
+            address = "tokyo.example.com",
+            port = 443,
+            vmess = VmessOptions(uuid = "uuid"),
+        )
+
+        val config = build(server, RoutingOptions())
+        val proxy = config["outbounds"]!!.jsonArray.first().jsonObject
+
+        assertEquals("vmess", proxy["type"]!!.jsonPrimitive.content)
+        assertEquals("true", proxy["mux"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+        assertEquals(4, proxy["mux"]!!.jsonObject["concurrency"]!!.jsonPrimitive.content.toInt())
     }
 
     @Test
@@ -133,6 +156,7 @@ class SingBoxConfigBuilderTest {
         assertEquals("tun", tun["type"]!!.jsonPrimitive.content)
         assertEquals(1500, tun["mtu"]!!.jsonPrimitive.content.toInt())
         assertEquals("false", tun["strict_route"]!!.jsonPrimitive.content)
+        assertEquals("mixed", tun["stack"]!!.jsonPrimitive.content)
         assertEquals(
             "local",
             config["dns"]!!.jsonObject["servers"]!!.jsonArray.first()
@@ -140,11 +164,16 @@ class SingBoxConfigBuilderTest {
         )
     }
 
+    @Test
+    fun userSettingsDefaultMtuIsRecommended() {
+        assertEquals(1280, UserSettings().mtu)
+    }
+
     private fun build(
         server: ServerEntry,
         routing: RoutingOptions,
         geo: GeoAssets = GeoAssets(),
-        mtu: Int = 9000,
+        mtu: Int = 1280,
     ): JsonObject {
         val text = SingBoxConfigBuilder.build(server, routing, geo, mtu)
         return json.parseToJsonElement(text).jsonObject

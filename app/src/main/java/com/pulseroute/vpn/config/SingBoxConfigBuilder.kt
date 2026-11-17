@@ -134,6 +134,10 @@ object SingBoxConfigBuilder {
             put("alter_id", options.alterId.coerceAtLeast(0))
             transport(options.transport)?.let { put("transport", it) }
             tls(options.tls)?.let { put("tls", it) }
+            putJsonObject("mux") {
+                put("enabled", true)
+                put("concurrency", 4)
+            }
         }
     }
 
@@ -148,6 +152,10 @@ object SingBoxConfigBuilder {
             options.flow?.takeIf { it.isNotBlank() }?.let { put("flow", it) }
             transport(options.transport)?.let { put("transport", it) }
             tls(options.tls)?.let { put("tls", it) }
+            putJsonObject("mux") {
+                put("enabled", true)
+                put("concurrency", 4)
+            }
         }
     }
 

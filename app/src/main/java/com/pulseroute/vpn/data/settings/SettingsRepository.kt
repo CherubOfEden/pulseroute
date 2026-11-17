@@ -25,7 +25,7 @@ class SettingsRepository(private val context: Context) {
                 countryCode = preferences[Keys.COUNTRY_CODE] ?: "IR",
                 blockAds = preferences[Keys.BLOCK_ADS] ?: false,
                 remoteServersUrl = preferences[Keys.REMOTE_SERVERS_URL] ?: "",
-                mtu = preferences[Keys.MTU] ?: 9000,
+                mtu = preferences[Keys.MTU] ?: 1280,
             )
         }
         .distinctUntilChanged()

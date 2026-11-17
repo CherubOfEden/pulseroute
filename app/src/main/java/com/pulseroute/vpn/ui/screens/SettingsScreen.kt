@@ -51,6 +51,9 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     container: AppContainer,
     onOpenRouting: () -> Unit,
+    onOpenServers: () -> Unit,
+    onOpenTroubleshooting: () -> Unit,
+    onOpenUsage: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -232,6 +235,15 @@ fun SettingsScreen(
                 }
                 OutlinedButton(onClick = onOpenRouting) {
                     Text(stringResource(R.string.nav_routing))
+                }
+                OutlinedButton(onClick = onOpenServers) {
+                    Text(stringResource(R.string.export_import))
+                }
+                OutlinedButton(onClick = onOpenTroubleshooting) {
+                    Text(stringResource(R.string.troubleshooting))
+                }
+                OutlinedButton(onClick = onOpenUsage) {
+                    Text(stringResource(R.string.usage_stats))
                 }
             }
         }
